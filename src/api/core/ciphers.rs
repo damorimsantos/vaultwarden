@@ -14,7 +14,7 @@ use serde_json::Value;
 use crate::{
     CONFIG,
     api::{self, EmptyResult, JsonResult, Notify, PasswordOrOtpData, UpdateType, core::log_event},
-    auth::ClientVersion,
+    auth::{ClientName, ClientVersion},
     auth::{Headers, OrgIdGuard, OwnerHeaders},
     config::PathType,
     crypto,
@@ -120,7 +120,13 @@ struct SyncData {
 }
 
 #[get("/sync?<data..>")]
-async fn sync(data: SyncData, headers: Headers, client_version: Option<ClientVersion>, conn: DbConn) -> JsonResult {
+async fn sync(
+    data: SyncData,
+    headers: Headers,
+    client_version: Option<ClientVersion>,
+    client_name: ClientName,
+    conn: DbConn,
+) -> JsonResult {
     let user_json = headers.user.to_json(&conn).await;
 
     // Get all ciphers which are visible by the user
@@ -157,7 +163,8 @@ async fn sync(data: SyncData, headers: Headers, client_version: Option<ClientVer
         Folder::find_by_user(&headers.user.uuid, &conn).await.iter().map(Folder::to_json).collect();
 
     // Item Sends fail the whole sync of clients that don't know them (the Android app has no fallback)
-    let show_item_sends = api::core::sends::client_supports_item_sends(headers.device.atype, client_version.as_ref());
+    let show_item_sends =
+        api::core::sends::client_supports_item_sends(headers.device.atype, client_version.as_ref(), &client_name);
     let sends_json: Vec<Value> = Send::find_by_user(&headers.user.uuid, &conn)
         .await
         .iter()
