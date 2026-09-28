@@ -1252,6 +1252,25 @@ impl<'r> FromRequest<'r> for MaybeClientVersion {
     }
 }
 
+/// The `Bitwarden-Client-Name` header (`web`, `browser`, `desktop`, `cli`...). Never fails.
+pub struct ClientName(pub Option<String>);
+
+impl ClientName {
+    /// The web vault is the one client this server serves itself, so it can run ahead of the store clients
+    pub fn is_web(&self) -> bool {
+        self.0.as_deref().is_some_and(|n| n.eq_ignore_ascii_case("web"))
+    }
+}
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for ClientName {
+    type Error = ();
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        Outcome::Success(ClientName(request.headers().get_one("Bitwarden-Client-Name").map(str::to_owned)))
+    }
+}
+
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthMethod {
