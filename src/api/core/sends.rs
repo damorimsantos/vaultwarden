@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::{
     CONFIG,
     api::{ApiResult, EmptyResult, JsonResult, Notify, UpdateType},
-    auth::{ClientIp, ClientVersion, Headers, Host, SendHeaders},
+    auth::{ClientIp, ClientName, ClientVersion, Headers, Host, SendHeaders},
     config::PathType,
     db::{
         DbConn, DbPool,
@@ -150,9 +150,16 @@ pub fn item_sharing_enabled() -> bool {
 }
 
 /// Whether this client version is recent enough for Item Sends and the SDK Sends API.
-/// A client that does not tell its version is treated as too old.
-pub fn client_version_supports_item_sharing(client_version: Option<&ClientVersion>) -> bool {
-    let Ok(min) = semver::Version::parse(&CONFIG.item_sharing_min_client_version()) else {
+/// A client that does not tell its version is treated as too old. The web vault uses
+/// `ITEM_SHARING_MIN_WEB_VERSION` when it is set, because it is served by this server.
+pub fn client_version_supports_item_sharing(client_version: Option<&ClientVersion>, client_name: &ClientName) -> bool {
+    let web_min = CONFIG.item_sharing_min_web_version();
+    let min = if client_name.is_web() && !web_min.is_empty() {
+        web_min
+    } else {
+        CONFIG.item_sharing_min_client_version()
+    };
+    let Ok(min) = semver::Version::parse(&min) else {
         return false;
     };
     client_version.is_some_and(|v| v.0 >= min)
@@ -161,9 +168,15 @@ pub fn client_version_supports_item_sharing(client_version: Option<&ClientVersio
 /// Whether Item Sends can be listed to this client. An unknown Send type fails the whole sync of the
 /// Android app (its Send type enum has no fallback), and the mobile apps follow their own release
 /// train, so they never get Item Sends whatever version they report.
-pub fn client_supports_item_sends(device_type: i32, client_version: Option<&ClientVersion>) -> bool {
+pub fn client_supports_item_sends(
+    device_type: i32,
+    client_version: Option<&ClientVersion>,
+    client_name: &ClientName,
+) -> bool {
     const MOBILE: [i32; 3] = [DeviceType::Android as i32, DeviceType::Ios as i32, DeviceType::AndroidAmazon as i32];
-    item_sharing_enabled() && client_version_supports_item_sharing(client_version) && !MOBILE.contains(&device_type)
+    item_sharing_enabled()
+        && client_version_supports_item_sharing(client_version, client_name)
+        && !MOBILE.contains(&device_type)
 }
 
 /// Validates the encrypted blob of an Item Send and keeps only the fields the server stores.
@@ -305,8 +318,13 @@ fn create_send(data: SendData, user_id: UserId) -> ApiResult<Send> {
 }
 
 #[get("/sends")]
-async fn get_sends(headers: Headers, client_version: Option<ClientVersion>, conn: DbConn) -> Json<Value> {
-    let show_items = client_supports_item_sends(headers.device.atype, client_version.as_ref());
+async fn get_sends(
+    headers: Headers,
+    client_version: Option<ClientVersion>,
+    client_name: ClientName,
+    conn: DbConn,
+) -> Json<Value> {
+    let show_items = client_supports_item_sends(headers.device.atype, client_version.as_ref(), &client_name);
     let sends = Send::find_by_user(&headers.user.uuid, &conn).await;
     let sends_json: Vec<Value> =
         sends.iter().filter(|s| show_items || s.atype != SendType::Item as i32).map(Send::to_json).collect();
@@ -323,12 +341,13 @@ async fn get_send(
     send_id: SendId,
     headers: Headers,
     client_version: Option<ClientVersion>,
+    client_name: ClientName,
     conn: DbConn,
 ) -> JsonResult {
     match Send::find_by_uuid_and_user(&send_id, &headers.user.uuid, &conn).await {
         Some(send)
             if send.atype != SendType::Item as i32
-                || client_supports_item_sends(headers.device.atype, client_version.as_ref()) =>
+                || client_supports_item_sends(headers.device.atype, client_version.as_ref(), &client_name) =>
         {
             Ok(Json(send.to_json()))
         }
@@ -997,9 +1016,16 @@ mod tests {
     #[test]
     fn min_client_version_gate() {
         let v = |s: &str| ClientVersion(semver::Version::parse(s).unwrap());
-        assert!(!client_version_supports_item_sharing(None));
-        assert!(!client_version_supports_item_sharing(Some(&v("2026.9.3"))));
-        assert!(client_version_supports_item_sharing(Some(&v("2026.10.0"))));
-        assert!(client_version_supports_item_sharing(Some(&v("2027.1.0"))));
+        let browser = ClientName(Some("browser".into()));
+        // Without ITEM_SHARING_MIN_WEB_VERSION the web vault has the same minimum as every other client
+        let web = ClientName(Some("web".into()));
+        for name in [&browser, &web, &ClientName(None)] {
+            assert!(!client_version_supports_item_sharing(None, name));
+            assert!(!client_version_supports_item_sharing(Some(&v("2026.9.3")), name));
+            assert!(client_version_supports_item_sharing(Some(&v("2026.10.0")), name));
+            assert!(client_version_supports_item_sharing(Some(&v("2027.1.0")), name));
+        }
+        assert!(web.is_web() && ClientName(Some("Web".into())).is_web());
+        assert!(!browser.is_web() && !ClientName(None).is_web());
     }
 }

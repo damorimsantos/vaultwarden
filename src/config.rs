@@ -729,6 +729,10 @@ make_config! {
         /// the mobile apps can not parse Item Sends, and an unknown Send type fails their whole sync.
         item_sharing_min_client_version: String, false, def, "2026.10.0".to_owned();
 
+        /// Minimum web vault version for temporary item sharing |> Overrides `ITEM_SHARING_MIN_CLIENT_VERSION` for the
+        /// web vault, which this server serves itself and can run ahead of the store clients. Empty uses the general minimum.
+        item_sharing_min_web_version: String, false, def, String::new();
+
         /// Require new device emails |> When a user logs in an email is required to be sent.
         /// If sending the email fails the login attempt will fail.
         require_device_email:   bool,   true,   def,     false;
@@ -1085,6 +1089,12 @@ fn validate_config(cfg: &ConfigItems, on_update: bool) -> Result<(), Error> {
 
     if semver::Version::parse(&cfg.item_sharing_min_client_version).is_err() {
         err!("`ITEM_SHARING_MIN_CLIENT_VERSION` must be a version like `2026.10.0`")
+    }
+
+    if !cfg.item_sharing_min_web_version.is_empty()
+        && semver::Version::parse(&cfg.item_sharing_min_web_version).is_err()
+    {
+        err!("`ITEM_SHARING_MIN_WEB_VERSION` must be empty or a version like `2026.9.1`")
     }
 
     #[expect(clippy::items_after_statements, reason = "Keep this close to where it is used")]
