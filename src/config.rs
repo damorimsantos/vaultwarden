@@ -733,6 +733,10 @@ make_config! {
         /// web vault, which this server serves itself and can run ahead of the store clients. Empty uses the general minimum.
         item_sharing_min_web_version: String, false, def, String::new();
 
+        /// Open item share links |> Lets Item Sends be opened by anyone with the link, or with a password, and not only
+        /// by verified emails. Off keeps the Bitwarden server rule, and item links created without email stop opening.
+        item_sharing_open_links: bool, false, def, false;
+
         /// Require new device emails |> When a user logs in an email is required to be sent.
         /// If sending the email fails the login attempt will fail.
         require_device_email:   bool,   true,   def,     false;
