@@ -260,7 +260,12 @@ fn apply_send_auth(
         }
     }
 
-    if send.atype == SendType::Item as i32 && send.auth_emails().is_none() {
+    check_item_send_auth(send, CONFIG.item_sharing_open_links())
+}
+
+/// Item Sends need email verification unless `ITEM_SHARING_OPEN_LINKS` allows open links
+fn check_item_send_auth(send: &Send, open_item_links: bool) -> EmptyResult {
+    if send.atype == SendType::Item as i32 && send.auth_emails().is_none() && !open_item_links {
         err!("Item Sends require email verification")
     }
     Ok(())
@@ -809,6 +814,21 @@ mod tests {
         assert!(apply_send_auth(&mut send, Some(SendAuthType::None as i32), None, None, None).is_err());
         assert!(apply_send_auth(&mut send, Some(SendAuthType::Password as i32), Some("hash"), None, None).is_err());
         assert!(apply_send_auth(&mut send, None, None, None, None).is_err());
+    }
+
+    #[test]
+    fn open_item_links_need_the_switch() {
+        let mut send = new_send(SendType::Item);
+        assert!(check_item_send_auth(&send, true).is_ok(), "anyone with the link");
+        assert!(check_item_send_auth(&send, false).is_err());
+
+        send.set_password(Some("hash"));
+        assert!(check_item_send_auth(&send, true).is_ok(), "anyone with the password");
+        assert!(check_item_send_auth(&send, false).is_err());
+
+        send.set_auth_emails(Some("a@x.com")).unwrap();
+        assert!(check_item_send_auth(&send, false).is_ok(), "email verified links never needed it");
+        assert!(check_item_send_auth(&new_send(SendType::Text), false).is_ok());
     }
 
     #[test]
