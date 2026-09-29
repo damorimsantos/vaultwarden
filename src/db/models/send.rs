@@ -206,8 +206,14 @@ impl Send {
     }
 
     pub fn auth_type(&self) -> SendAuthType {
-        // Item Sends are always email verified, matching the Bitwarden server
-        if self.atype == SendType::Item as i32 || self.auth_emails().is_some() {
+        self.auth_type_with(CONFIG.item_sharing_open_links())
+    }
+
+    /// Item Sends are always email verified, matching the Bitwarden server, unless `ITEM_SHARING_OPEN_LINKS`
+    /// allows open links. With it off, an open Item Send reads as email verified with no allowed email, so
+    /// the links already created stop opening instead of opening without a gate.
+    pub fn auth_type_with(&self, open_item_links: bool) -> SendAuthType {
+        if self.auth_emails().is_some() || (self.atype == SendType::Item as i32 && !open_item_links) {
             SendAuthType::Email
         } else if self.password_hash.is_some() {
             SendAuthType::Password
@@ -556,6 +562,23 @@ mod tests {
             new_send(SendType::Text, r#"{"text":"2.t","metadata":{"itemId":"5d4fbf2b-7a36-4b3c-9f2e-1a6d8c0e9b71"}}"#);
         assert_eq!(text.item_id(), None);
         assert!(!text.is_legacy_item(), "only Item Sends have a format");
+    }
+
+    #[test]
+    fn open_item_links_follow_the_send_auth_only_when_enabled() {
+        let mut send = new_send(SendType::Item, r#"{"encryptionVersion":1,"data":"{}"}"#);
+        assert_eq!(send.auth_type_with(true), SendAuthType::None);
+        assert_eq!(send.auth_type_with(false), SendAuthType::Email, "off: an open link can not be opened");
+
+        send.set_password(Some("hash"));
+        assert_eq!(send.auth_type_with(true), SendAuthType::Password);
+        assert_eq!(send.auth_type_with(false), SendAuthType::Email);
+
+        send.set_auth_emails(Some("a@x.com")).unwrap();
+        assert_eq!(send.auth_type_with(true), SendAuthType::Email);
+
+        let text = new_send(SendType::Text, r#"{"text":"2.t"}"#);
+        assert_eq!(text.auth_type_with(false), SendAuthType::None, "the switch only touches Item Sends");
     }
 
     #[test]
